@@ -1,0 +1,6 @@
+llama.cpp/
+data/
+*.gguf
+nohup.out
+*.log
+*.pid
