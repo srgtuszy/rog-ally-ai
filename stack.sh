@@ -97,7 +97,11 @@ run_server() {
     -ngl 99 \
     --flash-attn on \
     -c "${CTX}" \
-    --cache-reuse 256 \
+    -np 1 \
+    -b 1024 \
+    -ub 256 \
+    -ctk q8_0 \
+    -ctv q8_0 \
     --host 0.0.0.0 \
     --port "${PORT}" \
     --jinja \
@@ -164,6 +168,9 @@ start_server() {
     fi
 
     # Monitor running server — restart if it dies
+    while kill -0 "${pid}" 2>/dev/null; do
+      sleep 5
+    done
     wait "${pid}" 2>/dev/null
     local exit_code=$?
 

@@ -118,6 +118,19 @@ hermes
 | `LLAMA_CTX` | `32768` | Context window size |
 | `LLAMA_GPU_DEVICE` | `1` | Vulkan device index (`0` = iGPU, `1` = R9700) |
 
+## Stability tuning
+
+The server ships with flags that reduce GPU memory pressure and prevent ring timeouts on the R9700:
+
+| Flag | Value | Why |
+|---|---|---|
+| `-np 1` | 1 parallel slot | Single concurrent request, less KV cache duplication |
+| `-b 1024` | batch size 1024 | Smaller batches = less concurrent GPU work |
+| `-ub 256` | ubatch size 256 | Physical batch cap, directly reduces crash frequency |
+| `-ctk q8_0` / `-ctv q8_0` | 8-bit KV cache | Cuts KV cache VRAM in half with negligible quality loss |
+
+If crashes still occur under heavy load, try `-ub 128` for maximum stability at the cost of ~15% slower prefill.
+
 ## Why Vulkan instead of ROCm
 
 As of April 2026, every ROCm-based inference stack fails on the R9700 (gfx1201):
@@ -137,7 +150,7 @@ Community benchmarks on the R9700 ([source](https://github.com/ggml-org/llama.cp
 
 ## Known issues
 
-**GPU ring timeout during long inference** — The R9700 can hit a GFX ring timeout during sustained inference. The kernel logs `ring gfx_0.0.0 timeout` followed by a failed GPU reset. This is an amdgpu kernel driver issue with gfx12 over USB4. The start script runs a watchdog that automatically restarts the server when this happens. Using `--cache-reuse 256` reduces redundant GPU work and lowers the frequency of crashes.
+**GPU ring timeout during long inference** — The R9700 can hit a GFX ring timeout during sustained inference. The kernel logs `ring gfx_0.0.0 timeout` followed by a failed GPU reset. This is an amdgpu kernel driver issue with gfx12 over USB4. The start script runs a watchdog that automatically restarts the server when this happens. The server ships with `-np 1`, `-ub 256`, and `-ctk q8_0 -ctv q8_0` to minimize crash frequency. If crashes persist, try `-ub 128`.
 
 **iGPU blocks Vulkan enumeration** — The Ryzen Z1 Extreme's integrated GPU (Phoenix, gfx1103) has a broken `amdgpu_device_initialize` call that hangs any process that enumerates Vulkan devices (including `vulkaninfo` and `llama-server --list-devices`). The start script skips device enumeration and uses `GGML_VK_VISIBLE_DEVICES` to target the R9700 directly. If you need to run `vulkaninfo`, it will hang — this is a known libdrm issue with the Phoenix iGPU on Bazzite.
 
