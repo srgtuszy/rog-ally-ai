@@ -69,11 +69,11 @@ Or set it as the default by editing the `DEFAULT_MODEL` path in `stack.sh`.
 
 | Model | Quant | Size | Max Context | VRAM Usage | Notes |
 |---|---|---|---|---|---|
-| **Gemma-4 31B** | Q5_K_M | 22.6 GB | 64k | ~30 GB | Best quality, dense |
+| **Gemma-4 31B** | Q5_K_M | 22.6 GB | 32k | ~30 GB | Best quality, dense (default) |
 | **Gemma-4 26B-A4B** | Q4_K_M | 16 GB | 128k | ~24 GB | MoE, faster decode |
 | **Gemma-4 26B-A4B** | Q5_K_M | ~19 GB | 64k | ~27 GB | MoE, higher quality |
 
-Higher context requires more KV cache VRAM. The 31B dense model uses q4_0 KV cache to fit 64k; the 26B MoE fits 128k with the same settings.
+Higher context requires more KV cache VRAM. The 31B dense model at Q5_K_M fits 32k context in GPU memory. The 26B MoE fits 128k with the same settings.
 
 ## Step 5: Start the server
 
@@ -102,7 +102,7 @@ hermes model
 # API base URL: http://localhost:8000/v1
 # API key: none
 # Model name: (leave default)
-# Context length: 65536
+# Context length: 32768
 
 hermes
 ```
@@ -125,7 +125,7 @@ hermes
 |---|---|---|
 | `LLAMA_MODEL` | (built-in default) | Path to the GGUF model file |
 | `LLAMA_PORT` | `8000` | Server port |
-| `LLAMA_CTX` | `65536` | Context window size (Gemma-4 supports up to 262144) |
+| `LLAMA_CTX` | `32768` | Context window size (Gemma-4 supports up to 262144) |
 | `LLAMA_GPU_DEVICE` | `1` | Vulkan device index (`0` = iGPU, `1` = R9700) |
 
 ## Stability tuning
@@ -138,18 +138,19 @@ The server ships with flags tuned for Gemma-4's hybrid architecture (Gated Delta
 | `-np 1` | 1 parallel slot | Single concurrent request, minimizes VRAM pressure |
 | `-b 2048` | batch size 2048 | Default prefill batch |
 | `-ub 512` | ubatch size 512 | Default physical batch |
-| `-ctk q4_0 -ctv q4_0` | 4-bit KV cache | Cuts KV cache VRAM in half. Required for 31B dense at 64k context. Negligible quality loss. |
+| `-ctk q4_0 -ctv q4_0` | 4-bit KV cache | Cuts KV cache VRAM in half. Required for 31B dense. Negligible quality loss. |
 | `--cache-ram 0` | disabled prompt cache | SWA layers make checkpoints useless; saves 2-4s per request |
 
 ### Context vs VRAM budget
 
 | Model | Context | Model VRAM | KV Cache VRAM | Total |
 |---|---|---|---|---|
-| 31B Q5_K_M | 64k | 21.5 GB | 14.4 GB | ~36 GB (spills ~4 GB to RAM) |
+| 31B Q5_K_M | 32k | 21.5 GB | 7.9 GB | ~30 GB |
+| 31B Q5_K_M | 64k | 21.5 GB | 14.4 GB | ~36 GB (spills to RAM, avoid) |
 | 26B-A4B Q4_K_M | 128k | 16 GB | 13.4 GB | ~30 GB |
 | 26B-A4B Q5_K_M | 64k | ~19 GB | 7.2 GB | ~27 GB |
 
-If VRAM is tight, reduce context (`LLAMA_CTX=32768`) or use a smaller model.
+If VRAM is tight, reduce context (`LLAMA_CTX=16384`) or use a smaller model. The 31B Q5_K_M at 32k is the sweet spot — all tensors stay in GPU memory.
 
 ## Why Vulkan instead of ROCm
 

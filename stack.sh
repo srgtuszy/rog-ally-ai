@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLAMA_CPP_DIR="${BASE_DIR}/llama.cpp"
+
+# Server engine: "mainline" or "turboquant"
+SERVER_ENGINE="${LLAMA_ENGINE:-mainline}"
+
+if [ "${SERVER_ENGINE}" = "turboquant" ]; then
+  LLAMA_CPP_DIR="${BASE_DIR}/llama.cpp-turboquant"
+  log "Using TurboQuant engine (llama.cpp fork with TurboQuant KV cache)"
+else
+  LLAMA_CPP_DIR="${BASE_DIR}/llama.cpp"
+fi
+
 LLAMA_SERVER="${LLAMA_CPP_DIR}/build/bin/llama-server"
 MODEL_DIR="${BASE_DIR}/data/ollama/models/blobs"
 PIDFILE="${BASE_DIR}/data/llama-server.pid"
 LOGFILE="${BASE_DIR}/data/llama-server.log"
 
-# Default model: nemotron-cascade-2 (31B MoE, Q4_K_M, 24GB)
-DEFAULT_MODEL="${BASE_DIR}/data/models/google_gemma-4-31B-it-Q5_K_M.gguf"
+# Default model
+DEFAULT_MODEL="${BASE_DIR}/data/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
 MODEL="${LLAMA_MODEL:-${DEFAULT_MODEL}}"
 
 # Server settings
 PORT="${LLAMA_PORT:-8000}"
-CTX="${LLAMA_CTX:-32768}"
+CTX="${LLAMA_CTX:-131072}"
 GPU_DEVICE="${LLAMA_GPU_DEVICE:-1}"  # 0=iGPU, 1=R9700
 
 log() { printf '[gpu-setup] %s\n' "$*"; }
@@ -92,6 +102,14 @@ install_stack() {
 }
 
 run_server() {
+  local kv_type
+  if [ "${SERVER_ENGINE}" = "turboquant" ]; then
+    kv_type="turbo3"
+    log "KV cache type: turbo3 (3.25 bits/val, ~5x compression vs f16)"
+  else
+    kv_type="q4_0"
+  fi
+
   LD_LIBRARY_PATH="${LLAMA_CPP_DIR}/build/bin:${LD_LIBRARY_PATH}" GGML_VK_VISIBLE_DEVICES="${GPU_DEVICE}" "${LLAMA_SERVER}" \
     -m "${MODEL}" \
     -ngl 99 \
@@ -101,8 +119,8 @@ run_server() {
     -np 1 \
     -b 2048 \
     -ub 512 \
-    -ctk q4_0 \
-    -ctv q4_0 \
+    -ctk "${kv_type}" \
+    -ctv "${kv_type}" \
     --cache-ram 0 \
     --host 0.0.0.0 \
     --port "${PORT}" \
