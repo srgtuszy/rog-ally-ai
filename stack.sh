@@ -13,7 +13,7 @@ MODEL="${LLAMA_MODEL:-${DEFAULT_MODEL}}"
 
 # Server settings
 PORT="${LLAMA_PORT:-8000}"
-CTX="${LLAMA_CTX:-65536}"
+CTX="${LLAMA_CTX:-32768}"
 GPU_DEVICE="${LLAMA_GPU_DEVICE:-1}"  # 0=iGPU, 1=R9700
 
 log() { printf '[gpu-setup] %s\n' "$*"; }
