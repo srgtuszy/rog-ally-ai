@@ -49,18 +49,21 @@ This clones llama.cpp, builds it with `-DGGML_VULKAN=ON` targeting the RADV Mesa
 
 ## Step 4: Download a model
 
-Grab any GGUF from [HuggingFace](https://huggingface.co/models?sort=trending&search=gguf). The R9700 has 32 GB VRAM — models up to ~28 GB in Q4 quantization fit comfortably.
+Grab any GGUF from [HuggingFace](https://huggingface.co/models?sort=trending&search=gguf). The R9700 has 32 GB VRAM.
 
 ```bash
 mkdir -p ~/gpu-setup/data/models
 cd ~/gpu-setup/data/models
-wget https://huggingface.co/bartowski/google_gemma-4-31B-it-GGUF/resolve/main/google_gemma-4-31B-it-Q5_K_M.gguf
+# Default model: Gemma-4 26B-A4B Q5_K_M
+wget https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main/google_gemma-4-26B-A4B-it-Q5_K_M.gguf
+# Multimodal projector (vision support)
+wget https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-google_gemma-4-26B-A4B-it-f16.gguf
 ```
 
 Then point the server at it:
 
 ```bash
-LLAMA_MODEL=~/gpu-setup/data/models/google_gemma-4-31B-it-Q5_K_M.gguf ./start.sh
+LLAMA_MODEL=~/gpu-setup/data/models/google_gemma-4-26B-A4B-it-Q5_K_M.gguf ./start.sh
 ```
 
 Or set it as the default by editing the `DEFAULT_MODEL` path in `stack.sh`.
@@ -69,11 +72,37 @@ Or set it as the default by editing the `DEFAULT_MODEL` path in `stack.sh`.
 
 | Model | Quant | Size | Max Context | VRAM Usage | Notes |
 |---|---|---|---|---|---|
-| **Gemma-4 31B** | Q5_K_M | 22.6 GB | 32k | ~30 GB | Best quality, dense (default) |
-| **Gemma-4 26B-A4B** | Q4_K_M | 16 GB | 128k | ~24 GB | MoE, faster decode |
-| **Gemma-4 26B-A4B** | Q5_K_M | ~19 GB | 64k | ~27 GB | MoE, higher quality |
+| **Gemma-4 26B-A4B** | Q5_K_M | 18 GB | 128k | ~28 GB | MoE, vision support (default) |
+| **Gemma-4 26B-A4B** | Q4_K_M | 16 GB | 128k | ~25 GB | MoE, more headroom |
+| **Gemma-4 31B** | Q5_K_M | 22.6 GB | 32k | ~30 GB | Dense, best quality |
+| **Gemma-4 31B** | Q4_K_M | 18.3 GB | 64k | ~35 GB | Dense, overflows to RAM |
 
-Higher context requires more KV cache VRAM. The 31B dense model at Q5_K_M fits 32k context in GPU memory. The 26B MoE fits 128k with the same settings.
+The 26B-A4B MoE is the sweet spot — only 25 SWA attention layers (vs 50 on the dense 31B), so the KV cache at 128k is 7.9 GB instead of 15.8 GB.
+
+### Multimodal support
+
+Download the `mmproj` file alongside your model. The server auto-detects it if it's in the same directory with a matching name. Vision encoding takes ~8s, then generation runs at full speed.
+
+```bash
+wget https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-google_gemma-4-26B-A4B-it-f16.gguf
+```
+
+Send images via the OpenAI vision API format:
+
+```bash
+curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "gemma-4-26B-A4B",
+  "stream": false,
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "What is in this image?"},
+      {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
+    ]
+  }],
+  "max_tokens": 200
+}'
+```
 
 ## Step 5: Start the server
 
@@ -102,7 +131,7 @@ hermes model
 # API base URL: http://localhost:8000/v1
 # API key: none
 # Model name: (leave default)
-# Context length: 32768
+# Context length: 131072
 
 hermes
 ```
@@ -125,7 +154,7 @@ hermes
 |---|---|---|
 | `LLAMA_MODEL` | (built-in default) | Path to the GGUF model file |
 | `LLAMA_PORT` | `8000` | Server port |
-| `LLAMA_CTX` | `32768` | Context window size (Gemma-4 supports up to 262144) |
+| `LLAMA_CTX` | `131072` | Context window size (Gemma-4 supports up to 262144) |
 | `LLAMA_GPU_DEVICE` | `1` | Vulkan device index (`0` = iGPU, `1` = R9700) |
 
 ## Stability tuning
@@ -145,12 +174,12 @@ The server ships with flags tuned for Gemma-4's hybrid architecture (Gated Delta
 
 | Model | Context | Model VRAM | KV Cache VRAM | Total |
 |---|---|---|---|---|
+| 26B-A4B Q5_K_M + vision | 128k | 18.4 GB | 7.9 GB | ~28 GB |
+| 26B-A4B Q4_K_M | 128k | 16 GB | 7.9 GB | ~25 GB |
 | 31B Q5_K_M | 32k | 21.5 GB | 7.9 GB | ~30 GB |
-| 31B Q5_K_M | 64k | 21.5 GB | 14.4 GB | ~36 GB (spills to RAM, avoid) |
-| 26B-A4B Q4_K_M | 128k | 16 GB | 13.4 GB | ~30 GB |
-| 26B-A4B Q5_K_M | 64k | ~19 GB | 7.2 GB | ~27 GB |
+| 31B Q4_K_M | 64k | 18.3 GB | 15.8 GB | ~35 GB (spills to RAM, avoid) |
 
-If VRAM is tight, reduce context (`LLAMA_CTX=16384`) or use a smaller model. The 31B Q5_K_M at 32k is the sweet spot — all tensors stay in GPU memory.
+The 26B-A4B MoE at 128k is the sweet spot — all tensors stay in GPU memory with ~4 GB headroom.
 
 ## Why Vulkan instead of ROCm
 

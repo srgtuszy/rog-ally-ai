@@ -18,7 +18,7 @@ PIDFILE="${BASE_DIR}/data/llama-server.pid"
 LOGFILE="${BASE_DIR}/data/llama-server.log"
 
 # Default model
-DEFAULT_MODEL="${BASE_DIR}/data/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
+DEFAULT_MODEL="${BASE_DIR}/data/models/google_gemma-4-26B-A4B-it-Q5_K_M.gguf"
 MODEL="${LLAMA_MODEL:-${DEFAULT_MODEL}}"
 
 # Server settings
@@ -110,6 +110,28 @@ run_server() {
     kv_type="q4_0"
   fi
 
+  # Find mmproj for the current model (same directory, mmproj-*.gguf)
+  local mmproj=""
+  local model_dir
+  model_dir="$(dirname "${MODEL}")"
+  local model_base
+  model_base="$(basename "${MODEL}")"
+  # Strip quant suffix to find matching mmproj
+  local model_name
+  model_name="$(echo "${model_base}" | sed 's/-\(IQ[0-9]*_[A-Z]*\|Q[0-9]_K_[A-Z]*\|Q[0-9]_[0-9]*\)\.gguf$//')"
+  for f in "${model_dir}"/mmproj-"${model_name}"*.gguf; do
+    if [ -f "$f" ]; then
+      mmproj="$f"
+      break
+    fi
+  done
+
+  local mmproj_arg=""
+  if [ -n "${mmproj}" ]; then
+    mmproj_arg="--mmproj ${mmproj}"
+    log "Multimodal projector: $(basename "${mmproj}")"
+  fi
+
   LD_LIBRARY_PATH="${LLAMA_CPP_DIR}/build/bin:${LD_LIBRARY_PATH}" GGML_VK_VISIBLE_DEVICES="${GPU_DEVICE}" "${LLAMA_SERVER}" \
     -m "${MODEL}" \
     -ngl 99 \
@@ -122,6 +144,7 @@ run_server() {
     -ctk "${kv_type}" \
     -ctv "${kv_type}" \
     --cache-ram 0 \
+    ${mmproj_arg} \
     --host 0.0.0.0 \
     --port "${PORT}" \
     --jinja \
