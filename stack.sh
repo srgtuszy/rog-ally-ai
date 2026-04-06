@@ -13,7 +13,7 @@ MODEL="${LLAMA_MODEL:-${DEFAULT_MODEL}}"
 
 # Server settings
 PORT="${LLAMA_PORT:-8000}"
-CTX="${LLAMA_CTX:-32768}"
+CTX="${LLAMA_CTX:-65536}"
 GPU_DEVICE="${LLAMA_GPU_DEVICE:-1}"  # 0=iGPU, 1=R9700
 
 log() { printf '[gpu-setup] %s\n' "$*"; }
@@ -97,11 +97,13 @@ run_server() {
     -ngl 99 \
     --flash-attn on \
     -c "${CTX}" \
+    --swa-full \
     -np 1 \
-    -b 1024 \
-    -ub 256 \
-    -ctk q8_0 \
-    -ctv q8_0 \
+    -b 2048 \
+    -ub 512 \
+    -ctk q4_0 \
+    -ctv q4_0 \
+    --cache-ram 0 \
     --host 0.0.0.0 \
     --port "${PORT}" \
     --jinja \
