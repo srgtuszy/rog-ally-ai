@@ -8,12 +8,12 @@ PIDFILE="${BASE_DIR}/data/llama-server.pid"
 LOGFILE="${BASE_DIR}/data/llama-server.log"
 
 # Default model: nemotron-cascade-2 (31B MoE, Q4_K_M, 24GB)
-DEFAULT_MODEL="${BASE_DIR}/data/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
+DEFAULT_MODEL="${BASE_DIR}/data/models/google_gemma-4-31B-it-Q5_K_M.gguf"
 MODEL="${LLAMA_MODEL:-${DEFAULT_MODEL}}"
 
 # Server settings
 PORT="${LLAMA_PORT:-8000}"
-CTX="${LLAMA_CTX:-131072}"
+CTX="${LLAMA_CTX:-65536}"
 GPU_DEVICE="${LLAMA_GPU_DEVICE:-1}"  # 0=iGPU, 1=R9700
 
 log() { printf '[gpu-setup] %s\n' "$*"; }
