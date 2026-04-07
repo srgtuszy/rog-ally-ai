@@ -307,12 +307,24 @@ Environment:
 USAGE
 }
 
+run_daemon() {
+  if ! check_deps; then
+    return 1
+  fi
+  check_gpu
+  log "Running in daemon mode (systemd manages restarts)"
+  log "Model: $(basename "${MODEL}")"
+  log "Context: ${CTX}, GPU device: Vulkan${GPU_DEVICE}"
+  run_server
+}
+
 cmd="${1:-start}"
 case "${cmd}" in
   install)  install_stack ;;
   start)    start_server ;;
   stop)     stop_server ;;
   restart)  stop_server && start_server ;;
+  daemon)   run_daemon ;;
   status)   status_server ;;
   verify)   verify_server ;;
   models)   list_models ;;
