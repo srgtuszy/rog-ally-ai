@@ -2,29 +2,39 @@
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Server engine: "mainline" or "turboquant"
+# Server engine: "mainline", "turboquant", or "rocm"
 SERVER_ENGINE="${LLAMA_ENGINE:-mainline}"
 
 if [ "${SERVER_ENGINE}" = "turboquant" ]; then
   LLAMA_CPP_DIR="${BASE_DIR}/llama.cpp-turboquant"
   log "Using TurboQuant engine (llama.cpp fork with TurboQuant KV cache)"
+elif [ "${SERVER_ENGINE}" = "rocm" ]; then
+  LLAMA_SERVER="${BASE_DIR}/llama-server-rocm2"
+  ROCM_LIBS="${BASE_DIR}/bin:${BASE_DIR}/rocm7-libs"
+  log "Using ROCm engine (custom build for gfx1201)"
 else
   LLAMA_CPP_DIR="${BASE_DIR}/llama.cpp"
 fi
 
-LLAMA_SERVER="${LLAMA_CPP_DIR}/build/bin/llama-server"
+# Fallback for LLAMA_SERVER if not set by engine
+if [ -z "${LLAMA_SERVER}" ]; then
+  LLAMA_SERVER="${LLAMA_CPP_DIR}/build/bin/llama-server"
+fi
+
 MODEL_DIR="${BASE_DIR}/data/ollama/models/blobs"
 PIDFILE="${BASE_DIR}/data/llama-server.pid"
 LOGFILE="${BASE_DIR}/data/llama-server.log"
 
 # Default model
-DEFAULT_MODEL="${BASE_DIR}/data/models/google_gemma-4-26B-A4B-it-Q5_K_M.gguf"
+DEFAULT_MODEL="${BASE_DIR}/data/models/Qwen3.5-27B.Q3_K_M.gguf"
 MODEL="${LLAMA_MODEL:-${DEFAULT_MODEL}}"
 
 # Server settings
 PORT="${LLAMA_PORT:-8000}"
-CTX="${LLAMA_CTX:-131072}"
-GPU_DEVICE="${LLAMA_GPU_DEVICE:-1}"  # 0=iGPU, 1=R9700
+CTX="${LLAMA_CTX:-65536}"
+# GPU_DEVICE: Vulkan uses 0=dGPU (32GB), 1=iGPU (8GB)
+# For ROCm: 0=Ryzen Z1 (gfx1103), 1=Radeon AI PRO (gfx1201), use main-gpu to force model to dGPU
+GPU_DEVICE="${LLAMA_GPU_DEVICE:-0}"
 
 log() { printf '[gpu-setup] %s\n' "$*"; }
 warn() { printf '[gpu-setup] WARNING: %s\n' "$*" >&2; }
@@ -132,23 +142,40 @@ run_server() {
     log "Multimodal projector: $(basename "${mmproj}")"
   fi
 
-  LD_LIBRARY_PATH="${LLAMA_CPP_DIR}/build/bin:${LD_LIBRARY_PATH}" GGML_VK_VISIBLE_DEVICES="${GPU_DEVICE}" "${LLAMA_SERVER}" \
-    -m "${MODEL}" \
-    -ngl 99 \
-    --flash-attn on \
-    -c "${CTX}" \
-    --swa-full \
-    -np 1 \
-    -b 2048 \
-    -ub 512 \
-    -ctk "${kv_type}" \
-    -ctv "${kv_type}" \
-    --cache-ram 0 \
-    ${mmproj_arg} \
-    --host 0.0.0.0 \
-    --port "${PORT}" \
-    --jinja \
-    >> "${LOGFILE}" 2>&1
+  if [ "${SERVER_ENGINE}" = "rocm" ]; then
+    export LD_LIBRARY_PATH="${ROCM_LIBS}:${LD_LIBRARY_PATH}"
+    export ROCR_VISIBLE_DEVICES=1
+    "${LLAMA_SERVER}" \
+      -m "${MODEL}" \
+      -ngl 99 \
+      --flash-attn on \
+      -c "${CTX}" \
+      -np 4 \
+      -b 2048 \
+      -ub 512 \
+      --host 0.0.0.0 \
+      --port "${PORT}" \
+      --jinja \
+      --no-warmup \
+      >> "${LOGFILE}" 2>&1
+  else
+    LD_LIBRARY_PATH="${LLAMA_CPP_DIR}/build/bin:${LD_LIBRARY_PATH}" GGML_VK_VISIBLE_DEVICES="${GPU_DEVICE}" "${LLAMA_SERVER}" \
+      -m "${MODEL}" \
+      -ngl 99 \
+      --flash-attn on \
+      -c "${CTX}" \
+      -np 1 \
+      -b 2048 \
+      -ub 512 \
+      -ctk "${kv_type}" \
+      -ctv "${kv_type}" \
+      --cache-ram 0 \
+      ${mmproj_arg} \
+      --host 0.0.0.0 \
+      --port "${PORT}" \
+      --jinja \
+      >> "${LOGFILE}" 2>&1
+  fi
 }
 
 wait_for_port_free() {

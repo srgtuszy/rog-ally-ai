@@ -1,18 +1,38 @@
 # ROG Ally X + R9700 eGPU Inference Server
 
-Turn an ASUS ROG Ally X into a local LLM inference server by connecting an AMD Radeon AI PRO R9700 over USB4 and running llama.cpp with the Vulkan backend.
+Turn an ASUS ROG Ally X into a local LLM inference server by connecting an AMD Radeon AI PRO R9700 over USB4 and running llama.cpp with ROCm backend.
 
-## What you need
+## Hardware
 
-- ASUS ROG Ally X (or any USB4/Thunderbolt host)
-- AMD Radeon AI PRO R9700 in a USB4/Thunderbolt eGPU enclosure
-- [Bazzite](https://bazzite.gg/) installed (Fedora Atomic — works out of the box with the Ally X)
+- **Host**: ASUS ROG Ally X (Ryzen Z1 Extreme, 8GB iGPU)
+- **eGPU**: AMD Radeon AI PRO R9700 (gfx1201, 32GB VRAM) via USB4
+- **OS**: Bazzite (Fedora Atomic)
 
-## Step 1: Fix the kernel parameters
+## Quick Start
 
-The R9700 over USB4 hits an SMU firmware version mismatch that causes the GPU to hang after boot. The amdgpu driver's runtime power management triggers a fatal D3cold resume failure.
+```bash
+# Start the ROCm server (64K context, Q4 model)
+./start-rocm.sh
 
-Fix it by disabling the overdrive power feature and runtime PM:
+# Or with custom context
+./start-rocm.sh Qwen3.5-27B.Q4_K_M.gguf 65536 8000
+```
+
+Server runs on `http://localhost:8000` with OpenAI-compatible API at `/v1`.
+
+## Systemd Service
+
+```bash
+sudo cp llama-rocm.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now llama-rocm
+```
+
+## The Setup Process
+
+### 1. Fix the SMU issue
+
+The R9700 over USB4 hits an SMU firmware version mismatch that causes the GPU to hang after boot.
 
 ```bash
 sudo rpm-ostree kargs \
@@ -20,200 +40,93 @@ sudo rpm-ostree kargs \
   --append=amdgpu.runpm=0
 ```
 
-Reboot. Then verify the GPU is alive:
+Reboot. Verify the GPU:
 
 ```bash
-# Must show D0 (not D3cold)
-cat /sys/bus/pci/devices/0000:08:00.0/power_state
-
-# Must show both GPUs with utilization
-rocm-smi
+cat /sys/bus/pci/devices/0000:08:00.0/power_state  # Must show D0
+rocm-smi  # Must show both GPUs
 ```
 
-## Step 2: Install Homebrew dependencies
+### 2. Build llama.cpp with ROCm (the hard part)
 
-Bazzite is immutable — you can't `dnf install` into the base OS. Use Homebrew (pre-installed on Bazzite) for build tools:
+The pre-built ROCm binaries don't work with ROCm 6.4 on Bazzite. Build from source using a container:
 
 ```bash
-brew install cmake vulkan-headers shaderc
+# Start an Ubuntu 24.04 container with ROCm 7.2
+podman run -d --privileged -v $(pwd)/rocm-build:/workspace docker.io/ubuntu:24.04 sleep infinity
+
+# In the container:
+apt-get update && apt-get install -y wget gnupg2
+wget https://repo.radeon.com/amdgpu-install/7.2.1/ubuntu/noble/amdgpu-install_7.2.1.70201-1_all.deb
+dpkg -i amdgpu-install_7.2.1.70201-1_all.deb || apt --fix-broken install -y
+amdgpu-install -y --rocm
+
+apt-get install -y git cmake make
+
+git clone --depth 1 https://github.com/ggml-org/llama.cpp.git /workspace/llama.cpp
+cd /workspace/llama.cpp
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DGGML_HIP=ON -DCMAKE_HIP_ARCHITECTURES="gfx1201;gfx1103"
+cmake --build . -j$(nproc)
+
+# Copy binary and ROCm libraries back to host
+podman cp container:/workspace/llama.cpp/build/bin/llama-server /path/to/host/llama-server-rocm2
+podman cp container:/opt/rocm-7.2.1/lib/. /path/to/host/rocm7-libs/
+podman cp container:/workspace/llama.cpp/build/bin/lib*.so /path/to/host/bin/
 ```
 
-## Step 3: Build llama.cpp with Vulkan
+### 3. Run with ROCR_VISIBLE_DEVICES=1
+
+This hides the iGPU and forces 100% of the model to the dGPU:
 
 ```bash
-cd ~/gpu-setup
-./install.sh
+export ROCR_VISIBLE_DEVICES=1
+export LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH
+./llama-server-rocm2 -m data/models/Qwen3.5-27B.Q4_K_M.gguf -ngl 99 -c 65536 --port 8000 --jinja --no-warmup
 ```
 
-This clones llama.cpp, builds it with `-DGGML_VULKAN=ON` targeting the RADV Mesa driver, and produces `llama.cpp/build/bin/llama-server`.
+## Why ROCm instead of Vulkan?
 
-## Step 4: Download a model
+**Vulkan** works but has issues:
+- Hangs on higher context (128K fails, 64K works)
+- Model splits across both GPUs, causing USB4 bottleneck
 
-Grab any GGUF from [HuggingFace](https://huggingface.co/models?sort=trending&search=gguf). The R9700 has 32 GB VRAM.
+**ROCm** (after the build effort):
+- Full model on dGPU only (no USB4 bottleneck)
+- 64K context works reliably
+- Better VRAM management
 
-```bash
-mkdir -p ~/gpu-setup/data/models
-cd ~/gpu-setup/data/models
-# Default model: Gemma-4 26B-A4B Q5_K_M
-wget https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main/google_gemma-4-26B-A4B-it-Q5_K_M.gguf
-# Multimodal projector (vision support)
-wget https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-google_gemma-4-26B-A4B-it-f16.gguf
-```
+## Context vs VRAM
 
-Then point the server at it:
-
-```bash
-LLAMA_MODEL=~/gpu-setup/data/models/google_gemma-4-26B-A4B-it-Q5_K_M.gguf ./start.sh
-```
-
-Or set it as the default by editing the `DEFAULT_MODEL` path in `stack.sh`.
-
-### Available Gemma-4 models
-
-| Model | Quant | Size | Max Context | VRAM Usage | Notes |
-|---|---|---|---|---|---|
-| **Gemma-4 26B-A4B** | Q5_K_M | 18 GB | 128k | ~28 GB | MoE, vision support (default) |
-| **Gemma-4 26B-A4B** | Q4_K_M | 16 GB | 128k | ~25 GB | MoE, more headroom |
-| **Gemma-4 31B** | Q5_K_M | 22.6 GB | 32k | ~30 GB | Dense, best quality |
-| **Gemma-4 31B** | Q4_K_M | 18.3 GB | 64k | ~35 GB | Dense, overflows to RAM |
-
-The 26B-A4B MoE is the sweet spot — only 25 SWA attention layers (vs 50 on the dense 31B), so the KV cache at 128k is 7.9 GB instead of 15.8 GB.
-
-### Multimodal support
-
-Download the `mmproj` file alongside your model. The server auto-detects it if it's in the same directory with a matching name. Vision encoding takes ~8s, then generation runs at full speed.
-
-```bash
-wget https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-google_gemma-4-26B-A4B-it-f16.gguf
-```
-
-Send images via the OpenAI vision API format:
-
-```bash
-curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/json" -d '{
-  "model": "gemma-4-26B-A4B",
-  "stream": false,
-  "messages": [{
-    "role": "user",
-    "content": [
-      {"type": "text", "text": "What is in this image?"},
-      {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
-    ]
-  }],
-  "max_tokens": 200
-}'
-```
-
-## Step 5: Start the server
-
-```bash
-./start.sh
-```
-
-The server starts on `http://localhost:8000` with an OpenAI-compatible API at `/v1`. Any tool that speaks the OpenAI protocol works — Open WebUI, Hermes Agent, Continue, SillyTavern, etc.
-
-The start script runs a **watchdog** — if the server crashes (e.g. GPU ring timeout), it automatically restarts. No manual intervention needed.
-
-```bash
-./stack.sh verify
-```
-
-## Step 6 (optional): Set up Hermes Agent
-
-[Hermes Agent](https://github.com/NousResearch/hermes-agent) is a self-improving AI agent by Nous Research that connects to any OpenAI-compatible endpoint.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
-source ~/.bashrc
-
-hermes model
-# Select: Custom endpoint
-# API base URL: http://localhost:8000/v1
-# API key: none
-# Model name: (leave default)
-# Context length: 131072
-
-hermes
-```
-
-## Scripts
-
-| Script | What it does |
-|---|---|
-| `./install.sh` | Build llama.cpp with Vulkan |
-| `./start.sh` | Start the inference server |
-| `./stop.sh` | Stop it |
-| `./stack.sh status` | Check if it's running |
-| `./stack.sh verify` | Test inference end-to-end |
-| `./stack.sh logs` | Tail the server log |
-| `./stack.sh models` | List downloaded model files |
-
-## Environment variables
-
-| Variable | Default | What it controls |
-|---|---|---|
-| `LLAMA_MODEL` | (built-in default) | Path to the GGUF model file |
-| `LLAMA_PORT` | `8000` | Server port |
-| `LLAMA_CTX` | `131072` | Context window size (Gemma-4 supports up to 262144) |
-| `LLAMA_GPU_DEVICE` | `1` | Vulkan device index (`0` = iGPU, `1` = R9700) |
-
-## Stability tuning
-
-The server ships with flags tuned for Gemma-4's hybrid architecture (Gated Delta Net + SWA attention):
-
-| Flag | Value | Why |
-|---|---|---|
-| `--swa-full` | full-size SWA KV cache | Prevents checkpoint invalidation on hybrid models. Without this, SWA layers invalidate all context checkpoints beyond 1024 tokens, forcing a full re-process of the entire prompt on every request. |
-| `-np 1` | 1 parallel slot | Single concurrent request, minimizes VRAM pressure |
-| `-b 2048` | batch size 2048 | Default prefill batch |
-| `-ub 512` | ubatch size 512 | Default physical batch |
-| `-ctk q4_0 -ctv q4_0` | 4-bit KV cache | Cuts KV cache VRAM in half. Required for 31B dense. Negligible quality loss. |
-| `--cache-ram 0` | disabled prompt cache | SWA layers make checkpoints useless; saves 2-4s per request |
-
-### Context vs VRAM budget
-
-| Model | Context | Model VRAM | KV Cache VRAM | Total |
-|---|---|---|---|---|
-| 26B-A4B Q5_K_M + vision | 128k | 18.4 GB | 7.9 GB | ~28 GB |
-| 26B-A4B Q4_K_M | 128k | 16 GB | 7.9 GB | ~25 GB |
-| 31B Q5_K_M | 32k | 21.5 GB | 7.9 GB | ~30 GB |
-| 31B Q4_K_M | 64k | 18.3 GB | 15.8 GB | ~35 GB (spills to RAM, avoid) |
-
-The 26B-A4B MoE at 128k is the sweet spot — all tensors stay in GPU memory with ~4 GB headroom.
-
-## Why Vulkan instead of ROCm
-
-As of April 2026, every ROCm-based inference stack fails on the R9700 (gfx1201):
-
-- **Ollama** — The HIP runtime hangs during GPU discovery for 30 seconds then falls back to CPU. Open issue: [ollama#13236](https://github.com/ollama/ollama/issues/13236). Tested with `ollama/ollama:rocm` and the community `rjmalagon/ollama-linux-amd-apu` image (ROCm 7.2). Both timeout identically.
-- **vLLM** — The `kyuz0/vllm-therock-gfx1201` container (built on TheRock ROCm nightlies for R9700) crashes with `double free or corruption` during engine core initialization. Tested with gpt-oss-20b, Qwen3-14B, and Llama 3.1 8B — all crash the same way.
-- **Ollama in containers** — Any container that passes `/dev/kfd` to the GPU causes the process to hang and become an unkillable zombie. The container cannot be stopped or removed — only a host reboot clears it.
-
-**llama.cpp with Vulkan** uses the open-source RADV Mesa driver and avoids the entire ROCm/HIP stack. It works immediately with no driver installation beyond what Bazzite ships.
-
-Community benchmarks on the R9700 ([source](https://github.com/ggml-org/llama.cpp/discussions/21043)):
-
-| Model | Decode | Prefill |
-|---|---|---|
-| Qwen3.5-35B-A3B MoE (Q4_K_XL) | 148 tok/s | 2,400 tok/s |
-| Qwen3.5-27B Dense (Q4_K_M) | 29 tok/s | 800 tok/s |
-
-## Known issues
-
-**GPU ring timeout during long inference** — The R9700 can hit a GFX ring timeout during sustained inference. The kernel logs `ring gfx_0.0.0 timeout` followed by a failed GPU reset. This is an amdgpu kernel driver issue with gfx12 over USB4. The start script runs a watchdog that automatically restarts the server when this happens.
-
-**iGPU blocks Vulkan enumeration** — The Ryzen Z1 Extreme's integrated GPU (Phoenix, gfx1103) has a broken `amdgpu_device_initialize` call that hangs any process that enumerates Vulkan devices (including `vulkaninfo` and `llama-server --list-devices`). The start script skips device enumeration and uses `GGML_VK_VISIBLE_DEVICES` to target the R9700 directly. If you need to run `vulkaninfo`, it will hang — this is a known libdrm issue with the Phoenix iGPU on Bazzite.
-
-**Container GPU passthrough** — Running llama-server inside a container requires the container's Mesa/libdrm to support gfx1201. The official `ghcr.io/ggml-org/llama.cpp:server-vulkan` image ships an older Mesa that doesn't recognize the R9700. A custom Fedora 43 container with the host-matching `mesa-vulkan-drivers` works, but adds complexity. Native execution is simpler.
+| Model | Context | VRAM | Notes |
+|---|---|---|---|
+| Qwen3.5-27B Q3_K_M | 32K | ~12 GB | Smaller model, lower quality |
+| Qwen3.5-27B Q4_K_M | 64K | ~15 GB | Good balance (default) |
+| Qwen3.5-27B Q4_K_M | 32K | ~15 GB | More headroom |
 
 ## Troubleshooting
 
-**GPU not detected after boot** — Check `cat /sys/bus/pci/devices/0000:08:00.0/power_state`. If it shows `D3cold`, the kernel params from Step 1 aren't applied. Verify with `cat /proc/cmdline | grep amdgpu`.
+**Server won't start** - Check ROCm libs are in LD_LIBRARY_PATH:
+```bash
+LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
+```
 
-**GPU stuck after crash** — If `rocm-smi` shows the GPU but inference hangs or produces garbage, check `journalctl -k -b | grep "amdgpu.*08:00"` for ring timeout or GPU reset messages. Reboot to recover.
+**Model loads but server exits** - Try lower context or different model quant.
 
-**Server won't start / "cannot open shared library"** — Run `./install.sh` to rebuild. The server depends on shared libraries in `llama.cpp/build/bin/` — the start script sets `LD_LIBRARY_PATH` automatically.
+**Using both GPUs** - Must set `ROCR_VISIBLE_DEVICES=1` to hide iGPU.
 
-**Server picks the wrong GPU** — The iGPU is Vulkan0, the R9700 is Vulkan1. Set `LLAMA_GPU_DEVICE=1` (default).
+## Files
 
-**"error loading model hyperparameters"** — The model architecture is too new for the current llama.cpp build. Run `./install.sh` to rebuild from latest source.
+| File | Purpose |
+|---|---|
+| `start-rocm.sh` | Launch script |
+| `llama-server-rocm2` | ROCm binary built from source |
+| `bin/` | GGML shared libraries |
+| `rocm7-libs/` | ROCm 7.2 runtime |
+| `llama-rocm.service` | Systemd unit |
+
+## Performance
+
+- Qwen3.5-27B Q4_K_M at 64K context: ~25 tok/s
+- 100% on dGPU (12GB model) + minimal CPU (682MB)
+- No USB4 bottleneck between GPUs
