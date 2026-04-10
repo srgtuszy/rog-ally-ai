@@ -3,7 +3,7 @@
 
 set -e
 
-cd /var/home/srgtuszy/gpu-setup
+cd "$HOME/gpu-setup"
 
 echo "Installing llama-hermes.service..."
 sudo cp llama-hermes.service /etc/systemd/system/
