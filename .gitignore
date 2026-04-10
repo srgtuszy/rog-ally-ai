@@ -1,7 +1,8 @@
-llama.cpp/
-data/
+bin/
+rocm7-libs/
 *.gguf
-nohup.out
+llama-server-rocm*
+data/
 *.log
-*.pid
-llama.cpp-turboquant/
+llama.cpp/
+*.service
