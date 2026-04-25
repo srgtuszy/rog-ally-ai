@@ -21,9 +21,6 @@ Local LLM inference on an ASUS ROG Ally X via AMD Radeon AI PRO R9700 over USB4,
 ```bash
 # Qwen 3.5 27B on port 8000 (dGPU)
 ./start-rocm.sh
-
-# Hermes 3 8B on port 8002 (iGPU)
-./start-hermes.sh
 ```
 
 ## Systemd Service
@@ -91,13 +88,15 @@ LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 
 | File | Purpose |
 |---|---|
-| `start-rocm.sh` | Launch Qwen server (dGPU, port 8000) |
-| `start-hermes.sh` | Launch Hermes server (iGPU, port 8002) |
+| `start-rocm.sh` | Launch Qwen server (dGPU, port 8000) with GPU readiness check |
 | `llama-server-rocm2` | ROCm binary built from source |
 | `bin/` | GGML shared libraries |
 | `rocm7-libs/` | ROCm 7.2 runtime |
-| `llama-rocm.service` | Systemd unit for Qwen (with sleep inhibitor) |
-| `llama-hermes.service` | Systemd unit for Hermes (with sleep inhibitor) |
+| `llama-rocm.service` | Systemd unit for Qwen (with sleep inhibitor and auto-restart) |
+
+## Startup Behavior
+
+`start-rocm.sh` waits up to 2 minutes for the ROCm GPU to be available before starting the server. This handles the eGPU USB4 enumeration delay on boot. If the GPU isn't ready, the script exits with an error so systemd will retry.
 
 ## Troubleshooting
 
