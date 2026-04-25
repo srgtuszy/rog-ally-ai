@@ -9,7 +9,7 @@ Restart=on-failure
 RestartSec=5
 
 Environment=HOME=%h
-EnvironmentFile=%h/.config/gpu-setup/gpu-setup.env
+EnvironmentFile=-%h/.config/gpu-setup/gpu-setup.env
 
 [Install]
 WantedBy=default.target

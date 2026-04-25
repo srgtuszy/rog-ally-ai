@@ -3,7 +3,7 @@
 # Default: 262144 context (256K), port 8002
 
 cd /var/home/srgtuszy/gpu-setup
-export ROCR_VISIBLE_DEVICES=1
+export HIP_VISIBLE_DEVICES=1
 export LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH
 
 CTX="${1:-262144}"
