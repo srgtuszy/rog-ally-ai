@@ -30,11 +30,12 @@ The server auto-starts at login. To disable:
 
 ## Default Model
 
-- **Model**: `Qwen3.5-27B-Opus-Reasoning.Q3_K_M.gguf`
+- **Model**: `Qwen_Qwen3.6-27B-Q5_K_M.gguf`
 - **Context**: 262,144 tokens (256K)
 - **Port**: 8000
-- **Offload**: 65/65 layers on AI PRO R9700
+- **Offload**: 63/63 layers on AI PRO R9700
 - **KV cache**: q4_0 quantization on GPU
+- **Flash Attention**: auto-enabled (critical for USB4 eGPU)
 
 ## Helper Script
 
@@ -82,6 +83,23 @@ Running 256K context with a 27B model requires significant memory:
 
 **Total GPU**: ~18.8 GB / 32 GB VRAM
 **Total Host**: ~1.0 GB (unavoidable llama.cpp overhead)
+
+### Why Flash Attention Matters for USB4 eGPU
+
+The Radeon AI PRO R9700 connects over USB4, which provides ~40 Gbps bandwidth (roughly 5 GB/s usable). This is significantly less than a native PCIe x16 slot (~32 GB/s). Flash Attention is critical here because:
+
+| Without Flash Attention | With Flash Attention |
+|---|---|
+| Materializes full N×N score matrix in VRAM | Computes attention in tiles on-chip |
+| For 256K context: ~137 GB of HBM traffic per layer | Only output vectors written to HBM |
+| Saturates USB4 bandwidth, causing stalls | Minimal HBM traffic, USB4 stays uncongested |
+| Model weights may get evicted due to memory pressure | More VRAM headroom for weights + KV cache |
+
+Standard attention creates an intermediate matrix of size `seq_len² × heads × bytes`. At 256K context, that's approximately 137 GB of read/write traffic per attention layer. Over USB4's 5 GB/s, just materializing this matrix once would take ~27 seconds.
+
+Flash Attention avoids this by loading small tiles into fast on-chip SRAM, computing softmax and the output incrementally, and writing only the final result back to VRAM. This keeps the memory traffic bounded by the model weights and KV cache rather than exploding quadratically with sequence length.
+
+For this setup, Flash Attention is the difference between "usable 256K context" and "GPU constantly thrashing across the USB4 link."
 
 ### Swap Configuration
 
