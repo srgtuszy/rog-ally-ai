@@ -10,11 +10,11 @@ cd "${SCRIPT_DIR}"
 export HIP_VISIBLE_DEVICES=1
 export LD_LIBRARY_PATH=bin:rocm7-libs:${LD_LIBRARY_PATH:-}
 
-MODEL="${1:-Qwen3.5-27B-Opus-Reasoning.Q3_K_M.gguf}"
+MODEL="${1:-Qwen_Qwen3.6-27B-Q5_K_M.gguf}"
 CTX="${2:-262144}"
 PORT="${3:-8000}"
 HOST="${HOST:-::}"
-ALIAS="${MODEL_ALIAS:-qwen3.5-27b}"
+ALIAS="${MODEL_ALIAS:-qwen3.6-27b}"
 
 # Wait for the ROCm GPU to be available (eGPU over USB4 may need time to enumerate)
 MAX_RETRIES=30
@@ -56,5 +56,4 @@ exec ./llama-server-rocm2 \
     --host "${HOST}" \
     --port "${PORT}" \
     --jinja \
-    --no-mmap \
-    --no-warmup
+    --no-mmap
