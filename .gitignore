@@ -1,8 +1,21 @@
+# Binaries and libraries
 bin/
 rocm7-libs/
-*.gguf
-llama-server-rocm*
+rocm-bin/
+rocm6-bin/
+rocm-build/
+
+# Models and data
 data/
-*.log
+*.gguf
+
+# llama.cpp build directories
 llama.cpp/
-*.service
+llama.cpp-turboquant/
+
+# Compiled llama-server binaries
+llama-server-rocm*
+
+# Logs
+*.log
+nohup.out

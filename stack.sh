@@ -144,7 +144,7 @@ run_server() {
 
   if [ "${SERVER_ENGINE}" = "rocm" ]; then
     export LD_LIBRARY_PATH="${ROCM_LIBS}:${LD_LIBRARY_PATH}"
-    export ROCR_VISIBLE_DEVICES=1
+    export HIP_VISIBLE_DEVICES=0
     "${LLAMA_SERVER}" \
       -m "${MODEL}" \
       -ngl 99 \
