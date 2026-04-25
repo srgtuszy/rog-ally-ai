@@ -2,8 +2,9 @@
 # Usage: ./start-gemma.sh [context_size] [port]
 # Default: 131072 context (128K), port 8001
 
-cd /var/home/srgtuszy/gpu-setup
-export ROCR_VISIBLE_DEVICES=1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+export HIP_VISIBLE_DEVICES=1
 export LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH
 
 CTX="${1:-131072}"

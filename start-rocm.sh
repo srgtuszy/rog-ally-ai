@@ -2,7 +2,8 @@
 # Usage: ./start-rocm.sh [model] [context_size] [port]
 # Defaults: Q3_K_M model, 262144 context (256K), port 8000
 
-cd /var/home/srgtuszy/gpu-setup
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
 export HIP_VISIBLE_DEVICES=0
 export LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH
 

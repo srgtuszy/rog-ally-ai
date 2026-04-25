@@ -2,7 +2,8 @@
 # Usage: ./start-hermes.sh [context_size] [port]
 # Default: 262144 context (256K), port 8002
 
-cd /var/home/srgtuszy/gpu-setup
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
 export HIP_VISIBLE_DEVICES=1
 export LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH
 

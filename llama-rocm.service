@@ -4,9 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=srgtuszy
-WorkingDirectory=/var/home/srgtuszy/gpu-setup
-ExecStart=/var/home/srgtuszy/gpu-setup/start-rocm.sh
+WorkingDirectory=%h/gpu-setup
+ExecStart=%h/gpu-setup/start-rocm.sh
 Restart=always
 RestartSec=5
 

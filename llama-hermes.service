@@ -4,12 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=srgtuszy
-WorkingDirectory=/var/home/srgtuszy/gpu-setup
+WorkingDirectory=%h/gpu-setup
 Environment="HIP_VISIBLE_DEVICES=1"
-Environment="LD_LIBRARY_PATH=/var/home/srgtuszy/gpu-setup/bin:/var/home/srgtuszy/gpu-setup/rocm7-libs:/usr/lib64"
-ExecStart=/var/home/srgtuszy/gpu-setup/llama-server-rocm2 \
-    -m /var/home/srgtuszy/gpu-setup/data/models/Hermes-3-8B.Q4_K_M.gguf \
+Environment="LD_LIBRARY_PATH=%h/gpu-setup/bin:%h/gpu-setup/rocm7-libs:/usr/lib64"
+ExecStart=%h/gpu-setup/llama-server-rocm2 \
+    -m %h/gpu-setup/data/models/Hermes-3-8B.Q4_K_M.gguf \
     -ngl 99 \
     -c 262144 \
     -ctk q4_0 \

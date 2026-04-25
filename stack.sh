@@ -76,7 +76,7 @@ install_stack() {
   done
 
   # Ensure Vulkan headers
-  if ! find /home/linuxbrew -path "*/vulkan/vulkan.h" -print -quit 2>/dev/null | grep -q .; then
+  if ! find "$(brew --prefix)" -path "*/vulkan/vulkan.h" -print -quit 2>/dev/null | grep -q .; then
     log "Installing Vulkan headers..."
     brew install vulkan-headers shaderc
   fi
@@ -98,7 +98,7 @@ install_stack() {
     -DGGML_VULKAN=ON \
     -DGGML_NATIVE=ON \
     -DCMAKE_BUILD_TYPE=Release \
-    -DVulkan_INCLUDE_DIR=/home/linuxbrew/.linuxbrew/include \
+    -DVulkan_INCLUDE_DIR=$(brew --prefix)/include \
     -DVulkan_LIBRARY=/usr/lib64/libvulkan.so.1
 
   cmake --build build -j"$(nproc)" --target llama-server llama-cli
