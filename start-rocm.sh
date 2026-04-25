@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
 export HIP_VISIBLE_DEVICES=1
-export LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=bin:rocm7-libs:${LD_LIBRARY_PATH:-}
 
 MODEL="${1:-Qwen3.5-27B-Opus-Reasoning.Q3_K_M.gguf}"
 CTX="${2:-262144}"
@@ -44,12 +44,17 @@ fi
 
 exec ./llama-server-rocm2 \
     -m "data/models/${MODEL}" \
-    -ngl 99 \
+    -ngl 999 \
+    -sm none \
+    -mg 0 \
     -c "${CTX}" \
     -ctk q4_0 \
     -ctv q4_0 \
+    --kv-offload \
+    --no-host \
     --alias "${ALIAS}" \
     --host "${HOST}" \
     --port "${PORT}" \
     --jinja \
+    --no-mmap \
     --no-warmup

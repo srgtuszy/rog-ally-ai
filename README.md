@@ -14,23 +14,90 @@ Local LLM inference on an ASUS ROG Ally X via AMD Radeon AI PRO R9700 over USB4,
 | dGPU | 1 | Radeon AI PRO R9700 | 32GB |
 | iGPU | 0 | Ryzen Z1 Extreme | 8GB |
 
-> **Important**: `HIP_VISIBLE_DEVICES` is the variable that matters. `1` selects the dGPU, `0` selects the iGPU.
+> **Important**: `HIP_VISIBLE_DEVICES=1` selects the dGPU. `0` selects the iGPU. The server is hardcoded to use the dGPU only.
 
 ## Quick Start
 
 ```bash
-# Qwen 3.5 27B on port 8000 (dGPU)
-./start-rocm.sh
+# Start/stop/restart the Qwen server
+./llama-ctl.sh start    # or: stop, restart, status, logs
 ```
+
+The server auto-starts at login. To disable:
+```bash
+./llama-ctl.sh disable
+```
+
+## Default Model
+
+- **Model**: `Qwen3.5-27B-Opus-Reasoning.Q3_K_M.gguf`
+- **Context**: 262,144 tokens (256K)
+- **Port**: 8000
+- **Offload**: 65/65 layers on AI PRO R9700
+- **KV cache**: q4_0 quantization on GPU
+
+## Helper Script
+
+`llama-ctl.sh` wraps systemd for easy management:
+
+```bash
+./llama-ctl.sh {start|stop|restart|status|logs|enable|disable}
+```
+
+| Command | Action |
+|---|---|
+| `start` | Start the server |
+| `stop` | Stop the server |
+| `restart` | Restart the server |
+| `status` | Show systemd status |
+| `logs` | Show last 50 journal lines |
+| `enable` | Auto-start at login (default) |
+| `disable` | Manual start only |
 
 ## Systemd Service
 
 The service uses `systemd-inhibit` to prevent sleep and display dimming while the server is running.
 
 ```bash
-cp llama-rocm.service ~/.config/systemd/user/
+# Install service (one-time)
+cp llama-server.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now llama-rocm
+systemctl --user enable --now llama-server
+```
+
+> **Note**: The old `llama-rocm.service` has been deprecated. Use `llama-server.service` instead.
+
+## Memory Requirements for 256K Context
+
+Running 256K context with a 27B model requires significant memory:
+
+| Component | Size | Location |
+|---|---|---|
+| Model weights (Q3_K_M) | ~12.1 GB | AI Pro GPU |
+| KV cache (256K × q4_0) | ~5.2 GB | AI Pro GPU |
+| Recurrent state | ~0.6 GB | AI Pro GPU |
+| Compute buffers | ~0.8 GB | AI Pro GPU |
+| Token embeddings | ~0.5 GB | Host (required) |
+| ROCm dispatch | ~0.5 GB | Host (required) |
+
+**Total GPU**: ~18.8 GB / 32 GB VRAM
+**Total Host**: ~1.0 GB (unavoidable llama.cpp overhead)
+
+### Swap Configuration
+
+For stability with 256K context, ensure adequate swap:
+
+```bash
+# Check current swap
+swapon --show
+
+# The system should have at least 32GB total swap (zram + disk)
+# Bazzite uses zram by default. To resize:
+sudo swapoff /dev/zram0
+echo 1 | sudo tee /sys/block/zram0/reset
+echo 34359738368 | sudo tee /sys/block/zram0/disksize  # 32GB
+sudo mkswap /dev/zram0
+sudo swapon /dev/zram0
 ```
 
 ## Setup
@@ -88,11 +155,13 @@ LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 
 | File | Purpose |
 |---|---|
-| `start-rocm.sh` | Launch Qwen server (dGPU, port 8000) with GPU readiness check |
+| `llama-ctl.sh` | Helper script to start/stop/restart/status the server |
+| `start-rocm.sh` | Launch script (called by systemd and llama-ctl.sh) |
+| `llama-server.service` | Systemd user unit (auto-start, sleep inhibitor, restart) |
+| `llama-rocm.service` | **Deprecated** - old service file, do not use |
 | `llama-server-rocm2` | ROCm binary built from source |
 | `bin/` | GGML shared libraries |
 | `rocm7-libs/` | ROCm 7.2 runtime |
-| `llama-rocm.service` | Systemd unit for Qwen (with sleep inhibitor and auto-restart) |
 
 ## Startup Behavior
 
@@ -105,9 +174,13 @@ LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 ```
 
-**Out of memory** - Check VRAM usage:
+**Out of memory / system freezes** - Likely swap exhaustion. Ensure 32GB+ swap:
 ```bash
-rocm-smi --showpidgpus
+free -h && swapon --show
+```
+
+**Check VRAM usage**:
+```bash
 rocm-smi --showmeminfo vram
 ```
 
@@ -115,4 +188,14 @@ rocm-smi --showmeminfo vram
 ```bash
 ss -tlnp | grep 8000
 curl http://127.0.0.1:8000/health
+```
+
+**View server logs**:
+```bash
+./llama-ctl.sh logs
+```
+
+**Check GPU layer allocation**:
+```bash
+journalctl --user -u llama-server | grep "offloaded"
 ```
