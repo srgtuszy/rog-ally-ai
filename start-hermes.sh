@@ -4,7 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
-export HIP_VISIBLE_DEVICES=1
+export HIP_VISIBLE_DEVICES=0
 export LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH
 
 CTX="${1:-262144}"

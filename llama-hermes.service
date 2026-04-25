@@ -5,17 +5,9 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/gpu-setup
-Environment="HIP_VISIBLE_DEVICES=1"
-Environment="LD_LIBRARY_PATH=%h/gpu-setup/bin:%h/gpu-setup/rocm7-libs:/usr/lib64"
-ExecStart=%h/gpu-setup/llama-server-rocm2 \
-    -m %h/gpu-setup/data/models/Hermes-3-8B.Q4_K_M.gguf \
-    -ngl 99 \
-    -c 262144 \
-    -ctk q4_0 \
-    -ctv q4_0 \
-    --port 8002 \
-    --jinja \
-    --no-warmup
+Environment="HIP_VISIBLE_DEVICES=0"
+Environment="LD_LIBRARY_PATH=%h/gpu-setup/bin:%h/gpu-setup/rocm7-libs"
+ExecStart=/usr/bin/systemd-inhibit --what=idle:sleep:handle-lid-switch --who="llama-hermes" --why="LLM inference server running" --mode=block %h/gpu-setup/start-hermes.sh
 Restart=on-failure
 RestartSec=10
 
@@ -23,4 +15,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

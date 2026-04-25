@@ -5,12 +5,14 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/gpu-setup
-ExecStart=%h/gpu-setup/start-rocm.sh
-Restart=always
+Environment="HIP_VISIBLE_DEVICES=1"
+Environment="LD_LIBRARY_PATH=%h/gpu-setup/bin:%h/gpu-setup/rocm7-libs"
+ExecStart=/usr/bin/systemd-inhibit --what=idle:sleep:handle-lid-switch --who="llama-rocm" --why="LLM inference server running" --mode=block %h/gpu-setup/start-rocm.sh
+Restart=on-failure
 RestartSec=5
 
 StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
