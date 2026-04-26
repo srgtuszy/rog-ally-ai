@@ -78,15 +78,17 @@ Running 256K context with a 27B model requires significant memory:
 
 | Component | Size | Location |
 |---|---|---|
-| Model weights (Q4_K_M) | ~15.4 GB | AI Pro GPU |
+| Model weights (Q4_K_M) | ~15.1 GB | AI Pro GPU |
 | KV cache (256K × q4_0) | ~4.6 GB | AI Pro GPU |
 | Recurrent state + checkpoints | ~0.8 GB | AI Pro GPU |
 | Compute buffers | ~0.8 GB | AI Pro GPU |
 | Token embeddings | ~0.5 GB | Host (required) |
 | ROCm dispatch | ~0.5 GB | Host (required) |
 
-**Total GPU**: ~21.6 GB / 32 GB VRAM (~10 GB headroom for long-context compute buffers)
-**Total Host**: ~1.0 GB (unavoidable llama.cpp overhead)
+**Total GPU**: ~21.3 GB / 32 GB VRAM (~10.7 GB headroom for long-context compute buffers)
+**Total Host**: ~0.5 GB (unavoidable llama.cpp overhead)
+
+> **Note**: At 107K+ tokens with Q5_K_M (~18.7 GB weights), flash attention compute buffers exhausted the remaining ~8 GB of VRAM and caused ROCm OOM. Switching to Q4_K_M (~15.1 GB weights) frees ~3.6 GB, providing sufficient headroom for 256K context. Requests queue serially (`-np 1`) to prevent concurrent slot allocations from compounding the pressure.
 
 ### Why Flash Attention Matters for USB4 eGPU
 
@@ -197,10 +199,17 @@ LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 ```
 
 **Out of memory / system freezes** - The Qwen3.6 hybrid architecture creates large compute buffers during prompt processing. Applied fixes:
+- Switch from Q5_K_M to **Q4_K_M** quantization to reduce model weights by ~3.6 GB
 - `-np 1` prevents concurrent requests from allocating multiple slot buffers
 - `--ctx-checkpoints 4` caps recurrent state snapshots to ~600 MB
 - `-b 512` reduces peak VRAM during long-prompt prefill
 - `--no-warmup` skips the empty warmup run
+
+Download Q4_K_M from HuggingFace:
+```bash
+cd data/models
+wget https://huggingface.co/lmstudio-community/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-Q4_K_M.gguf
+```
 
 Also ensure 32GB+ swap:
 ```bash
