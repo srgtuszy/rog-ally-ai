@@ -48,6 +48,10 @@ exec ./llama-server-rocm2 \
     -sm none \
     -mg 0 \
     -c "${CTX}" \
+    -np 1 \
+    --ctx-checkpoints 4 \
+    -b 512 \
+    --no-warmup \
     -ctk q4_0 \
     -ctv q4_0 \
     --kv-offload \

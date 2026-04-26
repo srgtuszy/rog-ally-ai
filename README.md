@@ -36,6 +36,10 @@ The server auto-starts at login. To disable:
 - **Offload**: 63/63 layers on AI PRO R9700
 - **KV cache**: q4_0 quantization on GPU
 - **Flash Attention**: auto-enabled (critical for USB4 eGPU)
+- **Parallel slots**: `-np 1` (requests queue, no concurrent decoding)
+- **Context checkpoints**: `--ctx-checkpoints 4` (capped at ~600 MB instead of ~4.8 GB)
+- **Batch size**: `-b 512` (reduced from 2048 to lower peak VRAM during long prompts)
+- **Warmup**: `--no-warmup` (saves ~600 MB at startup)
 
 ## Helper Script
 
@@ -192,7 +196,13 @@ LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 ```
 
-**Out of memory / system freezes** - Likely swap exhaustion. Ensure 32GB+ swap:
+**Out of memory / system freezes** - The Qwen3.6 hybrid architecture creates large compute buffers during prompt processing. Applied fixes:
+- `-np 1` prevents concurrent requests from allocating multiple slot buffers
+- `--ctx-checkpoints 4` caps recurrent state snapshots to ~600 MB
+- `-b 512` reduces peak VRAM during long-prompt prefill
+- `--no-warmup` skips the empty warmup run
+
+Also ensure 32GB+ swap:
 ```bash
 free -h && swapon --show
 ```
