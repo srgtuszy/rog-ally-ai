@@ -49,7 +49,8 @@ exec ./llama-server-rocm2 \
     -mg 0 \
     -c "${CTX}" \
     -np 1 \
-    --ctx-checkpoints 4 \
+    --ctx-checkpoints 0 \
+    --cache-ram 4096 \
     -b 512 \
     --no-warmup \
     -ctk q4_0 \
