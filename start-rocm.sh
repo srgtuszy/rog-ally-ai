@@ -10,7 +10,7 @@ cd "${SCRIPT_DIR}"
 export HIP_VISIBLE_DEVICES=1
 export LD_LIBRARY_PATH=bin:rocm7-libs:${LD_LIBRARY_PATH:-}
 
-MODEL="${1:-Qwen_Qwen3.6-27B-Q5_K_M.gguf}"
+MODEL="${1:-Qwen_Qwen3.6-27B-Q4_K_M.gguf}"
 CTX="${2:-262144}"
 PORT="${3:-8000}"
 HOST="${HOST:-::}"

@@ -30,7 +30,7 @@ The server auto-starts at login. To disable:
 
 ## Default Model
 
-- **Model**: `Qwen_Qwen3.6-27B-Q5_K_M.gguf`
+- **Model**: `Qwen_Qwen3.6-27B-Q4_K_M.gguf`
 - **Context**: 262,144 tokens (256K)
 - **Port**: 8000
 - **Offload**: 63/63 layers on AI PRO R9700
@@ -78,14 +78,14 @@ Running 256K context with a 27B model requires significant memory:
 
 | Component | Size | Location |
 |---|---|---|
-| Model weights (Q3_K_M) | ~12.1 GB | AI Pro GPU |
-| KV cache (256K × q4_0) | ~5.2 GB | AI Pro GPU |
-| Recurrent state | ~0.6 GB | AI Pro GPU |
+| Model weights (Q4_K_M) | ~15.4 GB | AI Pro GPU |
+| KV cache (256K × q4_0) | ~4.6 GB | AI Pro GPU |
+| Recurrent state + checkpoints | ~0.8 GB | AI Pro GPU |
 | Compute buffers | ~0.8 GB | AI Pro GPU |
 | Token embeddings | ~0.5 GB | Host (required) |
 | ROCm dispatch | ~0.5 GB | Host (required) |
 
-**Total GPU**: ~18.8 GB / 32 GB VRAM
+**Total GPU**: ~21.6 GB / 32 GB VRAM (~10 GB headroom for long-context compute buffers)
 **Total Host**: ~1.0 GB (unavoidable llama.cpp overhead)
 
 ### Why Flash Attention Matters for USB4 eGPU
