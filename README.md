@@ -33,12 +33,16 @@ The server auto-starts at login. To disable:
 - **Model**: `Qwen_Qwen3.6-27B-Q4_K_M.gguf`
 - **Context**: 262,144 tokens (256K)
 - **Port**: 8000
-- **Offload**: 63/63 layers on AI PRO R9700
+- **Offload**: 65/65 layers on AI PRO R9700 (~15.1 GB)
 - **KV cache**: q4_0 quantization on GPU
-- **Flash Attention**: auto-enabled (critical for USB4 eGPU)
+- **Flash Attention**: explicitly enabled (`--flash-attn on`)
 - **Parallel slots**: `-np 1` (requests queue, no concurrent decoding)
-- **Context checkpoints**: `--ctx-checkpoints 4` (capped at ~600 MB instead of ~4.8 GB)
-- **Batch size**: `-b 512` (reduced from 2048 to lower peak VRAM during long prompts)
+- **Batch size**: `-b 1024` (up from 512, more tokens per GPU dispatch)
+- **Ubatch size**: `-ub 2048` (larger physical batch, fewer kernel launches over USB4)
+- **NUMA**: `--numa isolate` (pins threads to USB4 controller socket)
+- **CPU priority**: `--prio 2 --prio-batch 2` (high priority for inference threads)
+- **Polling**: `--poll 80 --poll-batch 1` (aggressive CPU-GPU sync)
+- **ROCm env**: `HSA_ENABLE_SDMA=1`, `HSA_OVERRIDE_GFX_VERSION=12.0.1` (USB4 memory copy optimization + optimal kernel selection for gfx1201)
 - **Warmup**: `--no-warmup` (saves ~600 MB at startup)
 
 ## Helper Script
@@ -79,13 +83,12 @@ Running 256K context with a 27B model requires significant memory:
 | Component | Size | Location |
 |---|---|---|
 | Model weights (Q4_K_M) | ~15.1 GB | AI Pro GPU |
-| KV cache (256K × q4_0) | ~4.6 GB | AI Pro GPU |
-| Recurrent state + checkpoints | ~0.8 GB | AI Pro GPU |
+| KV cache (256K x q4_0) | ~4.6 GB | AI Pro GPU |
 | Compute buffers | ~0.8 GB | AI Pro GPU |
 | Token embeddings | ~0.5 GB | Host (required) |
 | ROCm dispatch | ~0.5 GB | Host (required) |
 
-**Total GPU**: ~21.3 GB / 32 GB VRAM (~10.7 GB headroom for long-context compute buffers)
+**Total GPU**: ~21 GB / 32 GB VRAM (~11 GB headroom)
 **Total Host**: ~0.5 GB (unavoidable llama.cpp overhead)
 
 > **Note**: At 107K+ tokens with Q5_K_M (~18.7 GB weights), flash attention compute buffers exhausted the remaining ~8 GB of VRAM and caused ROCm OOM. Switching to Q4_K_M (~15.1 GB weights) frees ~3.6 GB, providing sufficient headroom for 256K context. Requests queue serially (`-np 1`) to prevent concurrent slot allocations from compounding the pressure.
@@ -201,8 +204,8 @@ LD_LIBRARY_PATH=bin:rocm7-libs:$LD_LIBRARY_PATH ./llama-server-rocm2 --version
 **Out of memory / system freezes** - The Qwen3.6 hybrid architecture creates large compute buffers during prompt processing. Applied fixes:
 - Switch from Q5_K_M to **Q4_K_M** quantization to reduce model weights by ~3.6 GB
 - `-np 1` prevents concurrent requests from allocating multiple slot buffers
-- `--ctx-checkpoints 4` caps recurrent state snapshots to ~600 MB
-- `-b 512` reduces peak VRAM during long-prompt prefill
+- `-b 1024` balances throughput with VRAM headroom during long-prompt prefill
+- `-ub 2048` reduces kernel launch frequency (important over USB4)
 - `--no-warmup` skips the empty warmup run
 
 Download Q4_K_M from HuggingFace:
@@ -236,3 +239,39 @@ curl http://127.0.0.1:8000/health
 ```bash
 journalctl --user -u llama-server | grep "offloaded"
 ```
+
+## Performance
+
+### Baseline Benchmarks (April 26 2026)
+
+Measured with Qwen3.6-27B Q4_K_M, fresh context, 500-token generation:
+
+| Metric | Value |
+|---|---|
+| Prompt eval | 177-230 tok/s |
+| Token generation | 23.6-23.8 tok/s |
+| VRAM usage | ~86-89% (28-29 GB of 32 GB) |
+| GPU utilization | 3% (USB4-bound) |
+
+### USB4 Bottleneck
+
+The eGPU is connected over USB4/Thunderbolt (~5 GB/s usable bandwidth). Each per-token forward pass requires GPU kernel launches and data transfers across this link, which explains the low GPU utilization (3%). The GPU spends most of its time waiting for CPU dispatch rather than computing.
+
+Key optimization levers that were applied to minimize USB4 round trips:
+- `-ub 2048` - larger physical batch reduces kernel launch frequency
+- `--numa isolate` - pins threads to the USB4 controller NUMA node
+- `HSA_ENABLE_SDMA=1` - uses SDMA engine for async memory copies
+- `--prio 2 --poll 80` - aggressive CPU scheduling for dispatch
+- `--flash-attn on` - reduces memory bandwidth for attention
+
+### What Didn't Help
+
+- **Ngram speculative decoding** - tested `ngram-cache`, `ngram-simple`, `ngram-map-k`; none engaged or improved throughput in testing
+- **Backend sampling** - no measurable difference
+- **Reducing sampler chain** - greedy decode (temp=0) gave identical speed
+
+### Potential Future Improvements
+
+- **Draft model speculative decoding** - a small draft model (Hermes-3-8B is already on disk) could predict tokens for the main model to verify in batch, potentially 1.5-2x speedup
+- **Rebuilding llama.cpp** - current binary is from commit 5dd1025; newer commits have ROCm/gfx1201-specific improvements
+- **Reducing context window** - at 256K the KV cache takes ~4.6 GB; reducing to 128K halves this and may improve tok/s

@@ -42,6 +42,10 @@ if [[ ! -f "data/models/${MODEL}" ]]; then
     exit 1
 fi
 
+# USB4/eGPU optimizations:
+# - -ub 2048: larger physical batch = fewer kernel launches over USB4
+# - --numa isolate: keep CPU threads on USB4 controller socket
+# - Removed ngram spec (wasn't working, saves CPU overhead)
 exec ./llama-server-rocm2 \
     -m "data/models/${MODEL}" \
     -ngl 999 \
@@ -51,12 +55,19 @@ exec ./llama-server-rocm2 \
     -np 1 \
     --ctx-checkpoints 0 \
     --cache-ram 4096 \
-    -b 512 \
+    -b 1024 \
+    -ub 2048 \
     --no-warmup \
     -ctk q4_0 \
     -ctv q4_0 \
     --kv-offload \
     --no-host \
+    --flash-attn on \
+    --prio 2 \
+    --prio-batch 2 \
+    --poll 80 \
+    --poll-batch 1 \
+    --numa isolate \
     --alias "${ALIAS}" \
     --host "${HOST}" \
     --port "${PORT}" \
