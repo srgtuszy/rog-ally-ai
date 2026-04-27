@@ -1,0 +1,44 @@
+# ROCm 7.2.2 build environment for llama.cpp
+# Based on official AMD docs: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html
+#
+# NOTE: First build downloads ~6GB of ROCm packages. Takes 10-20 min depending on bandwidth.
+# Once built, the image is reusable for future builds.
+#
+# Build: podman build -t llama-rocm-build-env -f Dockerfile.rocm-build .
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    gnupg2 \
+    git \
+    cmake \
+    make \
+    build-essential \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add ROCm 7.2.2 repo from AMD
+RUN set -ex && \
+    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /usr/share/keyrings/rocm.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.2.2 noble main" > /etc/apt/sources.list.d/rocm.list && \
+    apt-get update && \
+    # hip-dev: provides hipcc compiler + ROCm runtime (rocm-llvm, hsa-rocr, etc.)
+    # rocblas-dev: ROCm BLAS library for matrix ops
+    # rocminfo: GPU info utility (optional, useful for debugging)
+    apt-get install -y --no-install-recommends \
+        hip-dev \
+        rocblas-dev \
+        rocminfo \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Verify ROCm installation
+RUN rocminfo | head -5 || echo "rocminfo check skipped (no GPU in container)"
+
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
